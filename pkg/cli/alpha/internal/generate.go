@@ -19,8 +19,10 @@ package internal
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	log "github.com/sirupsen/logrus"
@@ -84,6 +86,41 @@ func (opts *Generate) Generate() error {
 	return nil
 }
 
+func validateInputPathDir(path string) error {
+	// input dir should be present always
+	// input dir should always have PROJECT file
+	
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		return fmt.Errorf("error: could not find input directory: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(path, "PROJECT")); os.IsNotExist(err) {
+		return fmt.Errorf("error: could not find PROJECT file in input directory: %v", err)
+	}
+
+	return nil
+}
+
+func validateOutputPathDir(path string) error {
+	// output dir should be empty if the path exists
+	// if the path does not exist then it will be created later on
+	f, err := os.Open(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	defer f.Close()
+	
+	names, err := f.Readdirnames(1)
+	if len(names) != 0 {
+		return fmt.Errorf("invalid output-dir: output directory is not empty")
+	} else{
+		if err != nil && err != io.EOF {
+			return fmt.Errorf("unable to validate output-dir: %v", err)
+		}
+	}
+	return nil
+}
+
 // Validate ensures the options are valid and kubebuilder is installed.
 func (opts *Generate) Validate() error {
 	cwd, err := os.Getwd()
@@ -95,9 +132,15 @@ func (opts *Generate) Validate() error {
 	if err != nil {
 		return err
 	}
+	if err = validateInputPathDir(opts.InputDir); err != nil {
+		return err
+	}
 
 	opts.OutputDir, err = getOutputPath(cwd, opts.OutputDir)
 	if err != nil {
+		return err
+	}
+	if err = validateOutputPathDir(opts.OutputDir); err != nil {
 		return err
 	}
 
@@ -232,7 +275,7 @@ func getInputPath(currentWorkingDirectory, inputPath string) (string, error) {
 // Helper function to get output path.
 func getOutputPath(currentWorkingDirectory, outputPath string) (string, error) {
 	if outputPath == "" {
-		outputPath = fmt.Sprintf("%s/%s", currentWorkingDirectory, defaultOutputDir)
+		outputPath = filepath.Join(currentWorkingDirectory, defaultOutputDir)
 	}
 	if _, err := os.Stat(outputPath); err == nil {
 		return "", fmt.Errorf("output path %s already exists", outputPath)
